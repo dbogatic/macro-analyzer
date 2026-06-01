@@ -8,7 +8,7 @@ import streamlit as st
 from config.base_weights import BASE_WEIGHTS
 from config.fred_series import FRED_SERIES, MARKET_SIGNALS
 from config.settings import APP_TITLE
-from data.loaders.fred_loader import load_all_series
+from data.loaders.fred_loader import load_all_series, load_financial_trend, get_unemployment_3m_trend
 from data.loaders.news_loader import fetch_macro_headlines
 from data.loaders.stooq_loader import get_gld_data
 from llm.shock_classifier import classify_shock
@@ -113,12 +113,38 @@ if st.button("Run Analysis", type="primary"):
     if updated_suggestion:
         st.session_state["shock_suggestion"] = updated_suggestion
 
+    # Financial trend signals — direction of HY spread and yield curve over
+    # the last 3 months. Optional: if FRED is unavailable the model continues
+    # without trend adjustments.
+    financial_trend = load_financial_trend()
+    if financial_trend.get("error"):
+        st.warning(f"Financial trend signals unavailable: {financial_trend['error']}")
+        financial_trend = None
+
     constraint_scores = build_constraint_scores(raw_data)
     fragility_scores = score_fragility(raw_data)
     constraint_total = float(sum(constraint_scores.values()))
     fragility_total = float(sum(fragility_scores.values()))
     previous_unemployment = st.session_state.get("previous_unemployment")
-    momentum = classify_momentum(float(raw_data["unemployment"]), previous_unemployment)
+
+    # Composite momentum: 3-month unemployment trend + jobless claims YoY.
+    # Falls back gracefully if FRED is unavailable.
+    try:
+        unemployment_3m_trend = get_unemployment_3m_trend()
+    except Exception:
+        unemployment_3m_trend = None
+
+    jobless_claims_yoy: float | None = None
+    raw_claims = market_data.get("jobless_claims")
+    if isinstance(raw_claims, (int, float)):
+        jobless_claims_yoy = float(raw_claims)
+
+    momentum = classify_momentum(
+        float(raw_data["unemployment"]),
+        previous_unemployment,
+        unemployment_3m_trend=unemployment_3m_trend,
+        jobless_claims_yoy=jobless_claims_yoy,
+    )
     st.session_state["previous_unemployment"] = float(raw_data["unemployment"])
     regime, classification = classify_regime(constraint_total, fragility_total, momentum)
     current_weights, weight_rationale = adjust_weights(
@@ -127,14 +153,16 @@ if st.button("Run Analysis", type="primary"):
     )
     scenarios = build_scenarios(
         {
-            "constraint_score": constraint_total,
-            "fragility_score": fragility_total,
-            "momentum": momentum,
-            "regime": regime,
+            "constraint_score":  constraint_total,
+            "fragility_score":   fragility_total,
+            "momentum":          momentum,
+            "regime":            regime,
+            "constraint_scores": constraint_scores,
+            "financial_trend":   financial_trend,
         }
     )
     triggers = evaluate_triggers(raw_data)
-    scenarios = apply_trigger_adjustments(scenarios, triggers)
+    scenarios = apply_trigger_adjustments(scenarios, triggers, fragility_scores=fragility_scores)
     scenarios, scenario_errors = finalize_scenarios(scenarios, fragility_total)
 
     system_state = {
@@ -196,12 +224,15 @@ if st.button("Run Analysis", type="primary"):
     tmp_dir = Path(".streamlit_tmp")
     tmp_dir.mkdir(exist_ok=True)
     docx_path = export_docx(report_text, tmp_dir / "macro_report.docx")
-    pdf_path = export_pdf(report_text, tmp_dir / "macro_report.pdf")
-
     with open(docx_path, "rb") as f:
         st.download_button("Download DOCX", f.read(), file_name=docx_path.name, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    with open(pdf_path, "rb") as f:
-        st.download_button("Download PDF", f.read(), file_name=pdf_path.name, mime="application/pdf")
+
+    try:
+        pdf_path = export_pdf(report_text, tmp_dir / "macro_report.pdf")
+        with open(pdf_path, "rb") as f:
+            st.download_button("Download PDF", f.read(), file_name=pdf_path.name, mime="application/pdf")
+    except Exception as e:
+        st.info(f"PDF export unavailable: {e}")
 
     with st.expander("Structured payload"):
         st.code(json.dumps(payload, indent=2, default=str), language="json")

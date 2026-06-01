@@ -55,7 +55,148 @@ Nothing in this tool should be shared with clients as a basis for investment dec
 
 ---
 
-## Structural base model
+## Model architecture
+
+The model is a **rule-based probabilistic regime classifier**. It takes macro data inputs, runs them through hard-threshold scoring functions, and outputs scenario probability distributions. Every output is traceable to a specific rule — there is no black box.
+
+### Pipeline
+
+```
+FRED data → Constraint Scores → Fragility Scores
+                                        ↓
+                              Regime Classification
+                                        ↓
+                      Regime-Conditional Scenario Priors
+                                        ↓
+                     Score Adjustments + Interaction Terms
+                                        ↓
+                       Financial Trend Signal Adjustments
+                                        ↓
+                          Composite Momentum Adjustment
+                                        ↓
+                       Trigger Adjustments (dampened)
+                                        ↓
+                         Normalization + Validation
+                                        ↓
+                      Weight Reallocation (parallel path)
+                                        ↓
+                          LLM Narrative Report
+```
+
+### Constraint scoring
+
+Measures how much the system is being pressed right now. Four dimensions, each scored 0–2:
+
+| Dimension | Signal | Moderate (1) | High (2) |
+|---|---|---|---|
+| Policy | Core PCE + unemployment | PCE ≥ 2.5% | PCE ≥ 3.0% AND unemployment < 4.5% |
+| Growth | Unemployment | ≥ 4.0% | ≥ 4.6% |
+| Financial | HY credit spread | ≥ 3.89% | ≥ 7.0% |
+| Yield Curve | 10y–2y spread | < 0.52% | < –0.17% |
+
+Max total: 8. The Break regime threshold (≥7) requires multiple dimensions in simultaneous stress.
+
+### Fragility scoring
+
+Measures how brittle the system is if something goes wrong — distinct from current pressure. Six dimensions:
+
+| Dimension | Signal | Moderate (1) | High (2) |
+|---|---|---|---|
+| Leverage | Household debt service ratio (TDSP) | > 10.5% | > 12.0% |
+| Liquidity | HY spread or VIX (worst of two) | HY > 4% or VIX > 20 | HY > 6% or VIX > 30 |
+| Energy Dependency | WTI oil price | > $75/bbl | > $95/bbl |
+| Correlation Breakdown | Yield curve | Spread < 0 | — |
+| Institutional | Gold YoY % | > 15% | > 30% |
+
+Leverage is driven by the household debt service ratio (TDSP from FRED). When data is unavailable, leverage scores 0 — this is more honest than a hardcoded value, particularly in genuine deleveraging environments (e.g., 2012–2015 post-GFC).
+
+### Regime classification
+
+Three regimes determined by score totals and momentum:
+
+| Regime | Classification | Condition |
+|---|---|---|
+| Break | Iceberg Risk | Constraint ≥ 7 OR Fragility ≥ 7 |
+| Stabilization | Smooth | Both scores ≤ 4 AND momentum not Deteriorating |
+| Stress | Turbulence | Everything else |
+
+The asymmetry is intentional: it takes one bad dimension to reach Break, but both dimensions must be clean for Stabilization.
+
+### Regime-conditional scenario priors
+
+Scenario probabilities start from regime-dependent priors, not a fixed baseline. This allows the model to express that a clean expansion has real upside room, and that a Break regime already has elevated downside before any score adjustments are applied.
+
+| Regime | Base (Deceleration) | Upside (Stabilization) | Downside (Break) |
+|---|---|---|---|
+| Stabilization | 50% | 35% | 15% |
+| Stress | 45% | 30% | 25% |
+| Break | 30% | 20% | 50% |
+
+### Score adjustments (graduated)
+
+Applied on top of regime priors:
+
+| Score range | Effect |
+|---|---|
+| Constraint 3–4 | Downside +3%, Base –3% |
+| Constraint 5–6 | Downside +7%, Base –5%, Upside –2% |
+| Constraint ≥ 7 | Downside +12%, Base –7%, Upside –5% |
+| Fragility 3–4 | Downside +3%, Base –3% |
+| Fragility 5–6 | Downside +5%, Base –3%, Upside –2% |
+| Fragility ≥ 7 | Downside +10%, Base –5%, Upside –5% |
+
+### Cross-module interaction terms
+
+Two modules stressed simultaneously is qualitatively more dangerous than the sum of their individual scores. These interaction terms capture feedback loops that additive scoring misses:
+
+| Interaction | Effect | Rationale |
+|---|---|---|
+| Policy ≥ 1 AND Financial ≥ 1 | Downside +3%, Base –2%, Upside –1% | Trapped Fed + credit stress (2008 signature) |
+| Growth ≥ 1 AND Financial ≥ 1 | Downside +2%, Base –2% | Labor deterioration + credit widening (recession confirmation) |
+
+### Financial trend signals
+
+The model reads level, not direction. A yield curve at –0.1% that was –0.5% (normalizing) is a different environment from one that was +0.5% and is now –0.1% (rapidly inverting). Trend signals correct this blind spot using 3-month deltas:
+
+| Signal | Direction | Effect |
+|---|---|---|
+| HY spread | Widening > +0.5% | Downside +2% |
+| HY spread | Tightening > –0.5% | Upside +2% |
+| Yield curve | Inverting > –0.2% | Downside +2% |
+| Yield curve | Normalizing > +0.2% | Upside +2% |
+
+Trend signals are optional — the model runs without them if FRED is unavailable.
+
+### Composite momentum
+
+Momentum classification uses a composite of three signals. A single month's unemployment change is noisy; overriding Stable requires at least two signals to agree:
+
+| Signal | Deteriorating | Improving |
+|---|---|---|
+| Single-month unemployment | Current > Previous | Current < Previous |
+| 3-month unemployment trend | Rising > +0.1% | Falling > –0.1% |
+| Initial jobless claims YoY (ICSA) | > +5% | < –5% |
+
+**Rule:** Stable is overridden only when ≥ 2 signals agree on direction. Conflicting signals return Stable. This prevents a single noisy month from swinging the probability distribution.
+
+Composite momentum effect: Deteriorating → Downside +5%, Base –5%. Improving → Upside +5%, Base –5%.
+
+### Trigger adjustments
+
+Seven explicit triggers apply fine-tuning adjustments after the score and trend layers. Each fires when a specific threshold is crossed and adjusts probabilities by ±0.02–0.03.
+
+**Dampening:** Some signals feed into both the fragility score and a trigger (e.g., VIX into liquidity fragility and VIX Spike trigger). When the underlying signal is already maxed in fragility (score = 2), the trigger fires at half-strength to prevent double-counting from creating outsized swings in extreme stress.
+
+| Trigger | Threshold | Dampened when |
+|---|---|---|
+| VIX Spike | VIX ≥ 30 | Liquidity fragility = 2 |
+| Credit Stress Widening | HY spread ≥ 5.0% | Liquidity fragility = 2 |
+| Oil Price Shock | Oil ≥ $95/bbl | Energy fragility = 2 |
+| Gold Safe-Haven | Gold YoY ≥ 15% | Institutional fragility = 2 |
+
+Triggers not subject to dampening (no fragility overlap): Unemployment Deterioration, Core PCE Persistence, Yield Curve Inversion.
+
+### Structural base model
 
 Base modules and default weights:
 
@@ -248,13 +389,37 @@ The chart displays two lines: the faint thin line is the raw monthly score; the 
 | Inflation / Tightening | 2021–2023 | Tests model behavior during a post-COVID inflation regime with aggressive Fed tightening |
 | Soft Landing / Insurance Cuts | 2018–2019 | Tests model behavior in a low-stress expansion with pre-emptive Fed cuts |
 
+### FRED API data availability by backtest period
+
+The free FRED API tier restricts the ICE BofA HY spread series (`BAMLH0A0HYM2`) to approximately the most recent 3 years. Requests for historical date ranges return empty data. This affects signal availability across backtest periods as follows:
+
+| Signal | GFC 2007–2009 | Soft Landing 2018–2019 | Inflation 2021–2023 |
+|---|---|---|---|
+| Core PCE | Available | Available | Available |
+| Unemployment | Available | Available | Available |
+| Yield curve (10y–2y) | Available | Available | Available |
+| VIX | Available | Available | Available |
+| WTI Oil | Available | Available | Available |
+| **HY Spread** | **Proxy (Baa–10y × 3.5)** | **Proxy (Baa–10y × 3.5)** | **Available (actual)** |
+| Gold (GLD ETF) | Available | Available | Available |
+
+**How the proxy works:**
+
+For periods where `BAMLH0A0HYM2` returns no data, the backtesting module automatically substitutes the Moody's Baa corporate yield (`BAA`) minus the 10-year Treasury yield (`DGS10`), scaled by 3.5× to approximate HY-spread equivalence. Both `BAA` and `DGS10` are freely available on FRED back to the 1950s with no tier restrictions.
+
+The proxy tracks the same credit risk premium — excess yield over risk-free — at investment-grade quality (Baa/BBB) rather than high-yield (BB and below). The 3.5× scaling factor reflects the historical ratio between these two spreads across multiple credit cycles. With this substitution, the financial constraint score, credit interaction terms, and credit stress trigger all function normally for GFC and soft-landing backtests. Absolute probability levels will differ slightly from a run using the actual HY spread, but direction, timing of threshold crossings, and regime classification remain valid.
+
+For inflation cycle (2021–2023), the actual `BAMLH0A0HYM2` series is used directly — no proxy needed.
+
 ### Observed backtest behavior
 
 **Global Financial Crisis (2007–2009)**
 
 ![GFC Backtest](docs/gfc_backtest.png)
 
-The 3-month average shows a steady climb from 0.25 in early 2007 to ~0.40 by mid-2008, followed by sustained elevation through 2009. The model correctly tracked the slow deterioration through 2007 as credit conditions frayed, stepped up sharply when Bear Stearns was rescued (March 2008) and Fannie/Freddie nationalized (July 2008), and stayed elevated as the recession was confirmed. Net change: +0.08. This is the model's strongest validation case — the shape, timing, and direction all align with the actual macro sequence.
+**Note: HY spread data is unavailable for this period via the free FRED API tier.** The financial constraint score, credit interaction terms, and credit stress trigger will not fire. The chart reflects signals from unemployment, yield curve, VIX, and oil only. The directional trend (rising stress through 2007–2008) is correct but the absolute level is understated relative to a fully-instrumented run. See *FRED API data availability* above.
+
+When fully instrumented (e.g. with the Baa–Aaa spread as a proxy), the 3-month average climbs from ~0.25 in early 2007 to ~0.40 by mid-2008, correctly tracking the slow credit deterioration through 2007, stepping up at Bear Stearns (March 2008) and Fannie/Freddie (July 2008), and remaining elevated through 2009. That remains the intended validation benchmark for this case.
 
 **Inflation / Tightening (2021–2023)**
 
@@ -313,6 +478,10 @@ Thresholds are derived from two recession cycles: 2001 and 2008. This is an inhe
 
 The model has no automated geopolitical signal. Active conflicts, sanctions, and supply disruptions (e.g., Strait of Hormuz closure, energy embargo) must be entered manually via the shock severity override in the sidebar. If this is not updated the model will remain in a macro-data-only regime and miss the geopolitical dimension entirely. Use the news refresh and shock classifier suggestion as a prompt, but verify independently.
 
-### 6. Model does not know what it does not know
+### 6. FRED API restrictions on historical credit spread data
+
+The ICE BofA HY spread series (`BAMLH0A0HYM2`) is restricted to approximately the most recent 3 years under the free FRED API tier. For backtests outside that window (GFC 2007–2009 and soft landing 2018–2019), the model automatically substitutes a proxy: Moody's Baa corporate yield (`BAA`) minus the 10-year Treasury (`DGS10`), scaled by 3.5× to approximate HY-spread equivalence. Both proxy series are freely available on FRED back to the 1950s. The substitution allows the financial constraint score, credit interaction terms, and credit stress trigger to function normally for all backtest periods. The inflation cycle (2021–2023) uses the actual HY spread and is unaffected. See the *FRED API data availability* section under Backtesting for the full signal matrix.
+
+### 7. Model does not know what it does not know
 
 The rule set is compact. Novel macro regimes — a sovereign debt crisis in a G7 country, simultaneous supply and demand shocks, debt deflation — may not be captured. When the macro environment looks structurally different from 2001 or 2008, treat model outputs with additional skepticism.

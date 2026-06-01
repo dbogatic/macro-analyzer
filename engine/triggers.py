@@ -145,17 +145,49 @@ def evaluate_triggers(data: dict[str, float]) -> list[Trigger]:
     return triggers
 
 
-def apply_trigger_adjustments(scenarios: list[dict], triggers: list[Trigger]) -> list[dict]:
+# Maps trigger dimension to the fragility score key it overlaps with.
+# When a signal is already maxed in fragility (score=2), the trigger fires
+# at half-strength to prevent the same signal from creating outsized
+# probability swings through double-counting.
+_TRIGGER_FRAGILITY_MAP: dict[str, str] = {
+    "Market Fear":              "liquidity",
+    "Financial Stress":         "liquidity",
+    "Energy / Supply":          "energy_dependency",
+    "Institutional / Risk-Off": "institutional",
+}
+
+
+def _dampening_factor(trigger: Trigger, fragility_scores: dict | None) -> float:
+    if not fragility_scores:
+        return 1.0
+    frag_key = _TRIGGER_FRAGILITY_MAP.get(trigger.dimension)
+    if frag_key and fragility_scores.get(frag_key, 0) >= 2:
+        return 0.5
+    return 1.0
+
+
+def apply_trigger_adjustments(
+    scenarios: list[dict],
+    triggers: list[Trigger],
+    fragility_scores: dict | None = None,
+) -> list[dict]:
     fired = [t for t in triggers if t.fired]
     scenario_map = {s["name"]: dict(s) for s in scenarios}
 
     for trigger in fired:
+        factor = _dampening_factor(trigger, fragility_scores)
         if trigger.scenario_up in scenario_map:
             low, high = scenario_map[trigger.scenario_up]["probability"]
-            scenario_map[trigger.scenario_up]["probability"] = (low + 0.02, high + 0.03)
+            scenario_map[trigger.scenario_up]["probability"] = (
+                low  + 0.02 * factor,
+                high + 0.03 * factor,
+            )
         if trigger.scenario_down in scenario_map:
             low, high = scenario_map[trigger.scenario_down]["probability"]
-            scenario_map[trigger.scenario_down]["probability"] = (max(0.0, low - 0.02), max(0.0, high - 0.03))
+            scenario_map[trigger.scenario_down]["probability"] = (
+                max(0.0, low  - 0.02 * factor),
+                max(0.0, high - 0.03 * factor),
+            )
 
     return list(scenario_map.values())
 

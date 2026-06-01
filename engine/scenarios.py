@@ -9,6 +9,9 @@ def build_scenarios(system_state: dict) -> list[dict]:
         float(system_state["constraint_score"]),
         float(system_state["fragility_score"]),
         system_state["momentum"],
+        regime=system_state.get("regime", "Stress"),
+        constraint_scores=system_state.get("constraint_scores"),
+        financial_trend=system_state.get("financial_trend"),
     )
 
     confidence = "Moderate" if system_state["regime"] != "Break" else "Low-Moderate"

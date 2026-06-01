@@ -11,7 +11,9 @@ FRED_SERIES = {
 
 # Market signals — optional, analysis continues if these fail
 MARKET_SIGNALS = {
-    "vix": "VIXCLS",      # CBOE VIX — market fear gauge
-    "oil": "DCOILWTICO",  # WTI crude oil price (USD/barrel)
+    "vix":            "VIXCLS",      # CBOE VIX — market fear gauge
+    "oil":            "DCOILWTICO",  # WTI crude oil price (USD/barrel)
+    "jobless_claims": "ICSA",        # Initial jobless claims (weekly) — leading labor signal
+    "debt_service":   "TDSP",        # Household debt service ratio (quarterly) — leverage proxy
     # Gold: FRED series discontinued. Loaded via Stooq (GLD ETF) in app.py.
 }

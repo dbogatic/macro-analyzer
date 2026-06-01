@@ -71,6 +71,14 @@ CALIBRATION = {
         "moderate": 75,    # judgment: energy costs begin constraining growth
         "severe":   95,    # judgment: demand destruction / stagflationary pressure
     },
+    # Household debt service ratio (TDSP) — leverage fragility proxy.
+    # Historical mean ~10%. Pre-GFC peak ~13%.
+    # moderate: above mean, households beginning to feel debt burden
+    # high: pre-crisis territory, debt service constraining consumption
+    "debt_service": {
+        "moderate": 10.5,  # above historical mean
+        "high":     12.0,  # pre-GFC stress territory
+    },
     # gold_yoy thresholds defined but not active.
     # Gold spot price unavailable via free FRED API (GOLDAMGBD228NLBM discontinued).
     # institutional fragility score is hardcoded to 0 until an alternative is sourced.

@@ -16,10 +16,22 @@ def score_fragility(data: dict) -> dict[str, int]:
     oil_sev   = CALIBRATION["oil"]["severe"]
     gold_mod  = CALIBRATION["gold_yoy"]["moderate"]
     gold_high = CALIBRATION["gold_yoy"]["high"]
+    ds_mod    = CALIBRATION["debt_service"]["moderate"]
+    ds_high   = CALIBRATION["debt_service"]["high"]
+
+    # Leverage: driven by household debt service ratio (TDSP).
+    # Default is 0 when data is unavailable — honest for a deleveraging
+    # environment. The old hardcoded 1 was correct on average but wrong
+    # at cycle extremes (post-GFC deleveraging 2012-2015).
+    debt_service = data.get("debt_service")
+    if debt_service is not None:
+        ds = float(debt_service)
+        leverage_score = 2 if ds > ds_high else 1 if ds > ds_mod else 0
+    else:
+        leverage_score = 0
 
     scores = {
-        # Leverage: systemic leverage is always present in a modern financial system
-        "leverage": 1,
+        "leverage": leverage_score,
 
         # Liquidity: driven by both HY spread (credit market stress)
         # and VIX (market fear). Takes the worse of the two signals.

@@ -9,7 +9,7 @@ from fredapi import Fred
 from config.settings import settings
 
 # Series that return index levels and must be converted to YoY % change
-YOY_SERIES = {"core_pce", "cpi", "gold"}
+YOY_SERIES = {"core_pce", "cpi", "gold", "jobless_claims"}
 
 _TIMEOUT    = 10   # seconds per request
 _MAX_TRIES  = 3    # total attempts before giving up
@@ -97,18 +97,106 @@ def load_series_range(series_id: str, start: str, end: str) -> pd.Series:
     raise RuntimeError(f"FRED range request failed after {_MAX_TRIES} attempts for {series_id}: {last_exc}")
 
 
-def load_dataset(series_map: dict[str, str], start: str, end: str, freq: str = "M") -> pd.DataFrame:
-    frame = pd.DataFrame()
+def get_unemployment_3m_trend(series_id: str = "UNRATE", months: int = 3) -> str:
+    """Return unemployment trend direction over the last N months.
+
+    Returns "Rising", "Falling", or "Stable". Used to smooth the single-month
+    momentum signal which is noisy on monthly FRED data.
+    """
+    series = _fetch_with_retry(series_id).dropna()
+    monthly = series.resample("ME").last().dropna()
+    if len(monthly) < months + 1:
+        return "Stable"
+    delta = float(monthly.iloc[-1] - monthly.iloc[-(months + 1)])
+    if delta > 0.1:
+        return "Rising"
+    if delta < -0.1:
+        return "Falling"
+    return "Stable"
+
+
+def get_series_delta(series_id: str, months: int = 3) -> float:
+    """Return the change in a series over the last N months (current minus N months ago).
+
+    Positive = rising, negative = falling. Used to compute trend direction for
+    HY spread and yield curve without requiring a full historical dataset load.
+    """
+    series = _fetch_with_retry(series_id)
+    series = series.dropna()
+    if len(series) < months + 1:
+        raise ValueError(f"Not enough history for {months}-month delta: {series_id}")
+    monthly = series.resample("ME").last().dropna()
+    if len(monthly) < months + 1:
+        raise ValueError(f"Not enough monthly observations for delta: {series_id}")
+    return float(monthly.iloc[-1] - monthly.iloc[-(months + 1)])
+
+
+def load_financial_trend(
+    hy_series_id: str = "BAMLH0A0HYM2",
+    y2_series_id: str = "DGS2",
+    y10_series_id: str = "DGS10",
+    months: int = 3,
+    hy_threshold: float = 0.5,
+    curve_threshold: float = 0.2,
+) -> dict[str, str | float | None]:
+    """Return trend labels for HY spread and yield curve over the last N months.
+
+    Labels: "Widening" / "Tightening" / "Stable" for HY spread.
+            "Inverting" / "Normalizing" / "Stable" for yield curve.
+    Returns None values and an error key if data cannot be loaded.
+    """
+    try:
+        hy_delta = get_series_delta(hy_series_id, months)
+        hy_trend = (
+            "Widening"   if hy_delta >  hy_threshold else
+            "Tightening" if hy_delta < -hy_threshold else
+            "Stable"
+        )
+    except Exception as exc:
+        return {"hy_trend": None, "curve_trend": None, "error": str(exc)}
+
+    try:
+        y2_delta  = get_series_delta(y2_series_id,  months)
+        y10_delta = get_series_delta(y10_series_id, months)
+        curve_delta = (y10_delta - y2_delta)
+        curve_trend = (
+            "Normalizing" if curve_delta >  curve_threshold else
+            "Inverting"   if curve_delta < -curve_threshold else
+            "Stable"
+        )
+    except Exception as exc:
+        return {"hy_trend": hy_trend, "curve_trend": None, "error": str(exc)}
+
+    return {
+        "hy_trend":    hy_trend,
+        "curve_trend": curve_trend,
+        "hy_delta":    round(hy_delta, 3),
+        "curve_delta": round(curve_delta, 3),
+    }
+
+
+def load_dataset(series_map: dict[str, str], start: str, end: str, freq: str = "ME") -> pd.DataFrame:
+    # Resample each series to the target frequency INDIVIDUALLY before joining.
+    # This prevents index misalignment between monthly series (first-of-month
+    # dates from FRED) and daily series (trading-day dates) which would cause
+    # daily series to be all-NaN after alignment to a monthly frame index.
+    columns: dict[str, pd.Series] = {}
     for label, series_id in series_map.items():
         try:
-            frame[label] = load_series_range(series_id, start, end)
+            s = load_series_range(series_id, start, end)
+            if freq:
+                s = s.resample(freq).last()
+            columns[label] = s
         except Exception:
             pass  # optional series missing — column simply absent from frame
-    frame = frame.dropna(how="all").sort_index()
-    if freq:
-        frame = frame.resample(freq).last().dropna(how="all")
+
+    if not columns:
+        return pd.DataFrame()
+
+    frame = pd.DataFrame(columns).sort_index().dropna(how="all")
+
     # Apply YoY transformation for index-level series
     for label in YOY_SERIES:
         if label in frame.columns:
-            frame[label] = frame[label].ffill().pct_change(12, fill_method=None) * 100
+            frame[label] = frame[label].ffill().pct_change(12) * 100
     return frame
