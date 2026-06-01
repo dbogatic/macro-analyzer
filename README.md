@@ -257,6 +257,16 @@ News headlines inform the narrative report only. They do **not** affect scores, 
 
 ## Installation
 
+**Recommended: conda**
+
+```bash
+conda create -n macro-analyzer python=3.11 -y
+conda activate macro-analyzer
+pip install -r requirements.txt
+```
+
+**Alternative: standard venv**
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -279,13 +289,14 @@ pytest
 
 The narrative report uses the OpenAI Chat Completions API (`client.chat.completions.create`). If `OPENAI_API_KEY` is missing, the app still runs the full analysis pipeline but report generation is disabled and replaced with a clear message.
 
-## Recommended build order
+## Getting started
 
-1. Run the app locally with real FRED and OpenAI keys
-2. Check the scoring and scenario outputs on live data
-3. Expand the trigger set and the regime logic
-4. Use the backtesting module to review directional behavior across historical periods
-5. Push to GitHub after confirming `.env` is ignored
+1. Create the conda environment and install dependencies
+2. Add your API keys to `.env` (FRED and OpenAI are required; NewsAPI is optional)
+3. Run `streamlit run app.py`
+4. Run a live analysis to verify scoring and scenario outputs against current FRED data
+5. Run the three backtest cases to validate directional model behavior against known historical periods
+6. Run `python -m scripts.calibrate_thresholds` to regenerate empirical thresholds from current FRED data
 
 ## Calibration methodology
 
@@ -293,9 +304,11 @@ The narrative report uses the OpenAI Chat Completions API (`client.chat.completi
 All constraint thresholds and scenario probability priors are calibrated against FRED data from **January 1996 to present**.
 
 1996 was chosen as the start date because:
-- It is the earliest date for which all required series are available (HY spread series `BAMLH0A0HYM2` begins 1996)
+- It is the earliest date for which all required calibration series are available (`BAMLH0A0HYM2` begins January 1996)
 - It falls within the post-Volcker, inflation-targeting monetary policy regime
 - It captures the full dot-com cycle buildup (1996–2000), which is necessary for pre-recession signal calibration
+
+Note: the free FRED API tier restricts `BAMLH0A0HYM2` to approximately the most recent 3 years for range queries. The calibration script uses a full-series fetch which may be subject to the same restriction. Re-run calibration with a paid FRED key or substitute the Baa–10y proxy series for full historical coverage.
 
 ### Recessions included
 Calibration uses NBER recession dates (`USREC` series) with the following treatment:
@@ -332,7 +345,7 @@ All other series (unemployment, HY spread, yield curve) use empirically derived 
 Run `python -m scripts.calibrate_thresholds` to regenerate empirical values from FRED data. Use `--write` to update `config/calibration.py`.
 
 ### Probability priors
-Base scenario probabilities (Controlled Deceleration / Stabilization / Downside Break) start from priors of 45/30/25 and are adjusted at runtime by constraint and fragility scores. The historical recession rate since 1996 (ex-COVID) is approximately 7.6% — lower than the 25% downside prior because NBER recessions are short relative to the full cycle and the downside scenario captures stress periods beyond outright recession.
+Scenario probabilities start from regime-conditional priors (see *Regime-conditional scenario priors* in the Model architecture section), not a fixed baseline. In Stress regime — the default for most of the cycle — priors are 45/30/25 (Base/Upside/Downside). In Stabilization regime they shift to 50/35/15; in Break regime to 30/20/50. The historical recession rate since 1996 (ex-COVID) is approximately 7.6% — lower than the 25% Stress-regime downside prior because NBER recessions are short relative to the full cycle and the downside scenario captures stress periods beyond outright recession.
 
 ## Market signals
 
@@ -340,11 +353,13 @@ VIX, WTI crude oil, and gold are included as real-time market signals alongside 
 
 ### Data sources
 
-| Signal | Source | Notes |
-|---|---|---|
-| VIX | FRED (`VIXCLS`) | Daily, real-time |
-| WTI Oil | FRED (`DCOILWTICO`) | Daily, real-time |
-| Gold | Yahoo Finance (GLD ETF) | GLD close × 10 ≈ gold spot $/oz. All FRED gold series are discontinued. Live and backtest gold both use Yahoo Finance — backtests fetch the full GLD history for the requested window. |
+| Signal | FRED series | Frequency | Notes |
+|---|---|---|---|
+| VIX | `VIXCLS` | Daily | Market fear gauge |
+| WTI Oil | `DCOILWTICO` | Daily | Crude oil price $/bbl |
+| Gold | Yahoo Finance (GLD ETF) | Daily | GLD close × 10 ≈ gold spot $/oz. All FRED gold series are discontinued. Used for both live and backtest runs. |
+| Initial jobless claims | `ICSA` | Weekly | YoY % change used as leading labor market signal in composite momentum |
+| Household debt service ratio | `TDSP` | Quarterly | Used as dynamic leverage score in fragility. Defaults to 0 when unavailable. |
 
 ### How they feed into the model
 
@@ -359,7 +374,7 @@ VIX, WTI crude oil, and gold are included as real-time market signals alongside 
 Market signals affect probabilities **indirectly** through the fragility score:
 - Higher fragility → heavier weight on financial and policy modules
 - Fragility >= 7 triggers a direct downside probability adjustment (+10%)
-- Max fragility is 8 (leverage 1 + liquidity 2 + energy 2 + correlation 1 + institutional 2)
+- Max fragility is 9 (leverage 2 + liquidity 2 + energy 2 + correlation 1 + institutional 2)
 
 ### Oil and the energy/geo weight
 
@@ -411,34 +426,32 @@ The proxy tracks the same credit risk premium — excess yield over risk-free �
 
 For inflation cycle (2021–2023), the actual `BAMLH0A0HYM2` series is used directly — no proxy needed.
 
-### Observed backtest behavior
+### What each backtest case tests
 
 **Global Financial Crisis (2007–2009)**
 
-![GFC Backtest](docs/gfc_backtest.png)
-
-**Note: HY spread data is unavailable for this period via the free FRED API tier.** The financial constraint score, credit interaction terms, and credit stress trigger will not fire. The chart reflects signals from unemployment, yield curve, VIX, and oil only. The directional trend (rising stress through 2007–2008) is correct but the absolute level is understated relative to a fully-instrumented run. See *FRED API data availability* above.
-
-When fully instrumented (e.g. with the Baa–Aaa spread as a proxy), the 3-month average climbs from ~0.25 in early 2007 to ~0.40 by mid-2008, correctly tracking the slow credit deterioration through 2007, stepping up at Bear Stearns (March 2008) and Fannie/Freddie (July 2008), and remaining elevated through 2009. That remains the intended validation benchmark for this case.
+This is the primary stress-detection validation case. The model should show a rising downside trend through 2007 as credit conditions deteriorated (Baa spread proxy rising, yield curve flattening), a sustained peak through mid-to-late 2008 as unemployment climbed, the yield curve fully inverted, and VIX spiked, then a gradual decline into late 2009 as the policy response stabilized credit markets. The meaningful signal is the shape and duration of elevation through 2008 — the model should track the buildup, not just react at the peak. Credit spread data uses the Baa–10y proxy for this period (see *FRED API data availability* above).
 
 **Inflation / Tightening (2021–2023)**
 
-![Inflation Cycle Backtest](docs/inflation_backtest.png)
-
-The 3-month average sits flat at 0.25 through all of 2021 — FRED data was still showing post-COVID normalization and the policy constraint had not yet fired. From early 2022 it climbs steadily to ~0.35 by mid-2022 as core PCE crossed thresholds and the Fed began aggressive hikes. It then holds elevated at 0.33–0.35 through 2023 because the yield curve inversion and policy constraint remained in place even as inflation was falling. This illustrates an important model property: the constraint score responds to whether pressure has *resolved*, not just whether the direction has improved. Net change: +0.08.
+This case tests the model's inflation constraint logic. Through 2021, core PCE had not yet crossed the 2.5% moderate threshold and the policy constraint should score 0 — the model should sit flat in Stabilization or low Stress regime. From early 2022, as core PCE crossed 2.5% then 3.0% and the Fed began aggressive hikes, the policy constraint should step up sharply. The yield curve then inverted through 2022–2023, keeping the constraint score elevated even as inflation began falling. This illustrates a key model property: the constraint score responds to whether pressure has *resolved*, not just whether the direction has improved. The model should remain in Stress regime through most of 2023. This is the most complete backtest — actual HY spread data is available for this period.
 
 **Soft Landing / Insurance Cuts (2018–2019)**
 
-![Soft Landing Backtest](docs/soft_landing_backtest.png)
+This case validates that the model does not generate false stress signals in a benign expansion. Core PCE was below 2.5% throughout, unemployment was low and stable, and the only active signal was the yield curve flattening toward and occasionally crossing the 0.52% warning threshold. The model should stay in Stress or Stabilization regime with a flat, low downside trend for the full period, with minor oscillation from the yield curve hovering near its threshold. A mild drift upward in late 2019 is expected from the three pre-emptive Fed cuts and repo market stress — but no sustained elevation. Net change close to zero is the correct result.
 
-The 3-month average stays flat at 0.26–0.28 for the entire period with a mild drift to ~0.29 in late 2019 (repo market stress, three insurance cuts). Net change: 0. This is the correct result — there was no recession and no sustained macro deterioration. The raw monthly line shows oscillation between 0.25 and 0.30 driven by the yield curve spread hovering near the 0.52% threshold, but the rolling average correctly reads through it as a stable, low-stress expansion.
+### How to interpret the chart
 
-### How to read the backtest output
+The backtesting view shows two lines: a faint monthly raw score and a bold 3-month rolling average. **Read the rolling average.** Hard-threshold scoring causes the monthly line to oscillate when a series hovers near a boundary — this is a structural property of the model, not noise in the data. The rolling average filters that oscillation and reveals the underlying trend.
 
-- **Direction and shape matter more than the absolute level.** Flat = stable, rising and holding = building stress, declining = relief.
-- **A net change of +0.08 in the GFC looks the same as +0.08 in the inflation cycle** — but the paths are completely different. Read the chart, not just the summary numbers.
-- **The model does not predict recessions.** It identifies when macro conditions have moved into territory that historically precedes stress. Whether that stress leads to a recession depends on factors (policy response, external shocks, timing) that the model does not capture.
-- **The 3-month average is the signal. Monthly spikes above the average are real but transient.** A spike that doesn't sustain in the rolling average is a single noisy data point, not a trend.
+What matters:
+- **Direction and duration**: A sustained upward trend means genuine stress accumulation. A brief spike that reverts is a single noisy data point.
+- **Shape, not absolute level**: The model's probability range is bounded by design (see Known limitations). Compare the shape of each period against the others, not the raw numbers.
+- **Start/end metrics**: The summary Start/End/Change statistics at the top of the backtest view capture only the endpoints. For GFC — where stress built through the middle of the period — these numbers are less informative than the chart itself.
+
+### What the model does and does not tell you
+
+The model identifies when macro conditions have moved into territory that historically precedes stress. It does not predict whether that stress leads to a recession — that depends on factors (policy response, external shocks, sequencing) the model cannot capture. Use the backtest to calibrate your intuition for what "elevated" looks like in this framework, not to validate specific probability numbers.
 
 ### COVID excluded from backtesting
 
@@ -466,9 +479,9 @@ The primary data source is FRED. Most FRED macro series (Core PCE, unemployment,
 
 All scoring uses hard thresholds: a series either crosses a boundary or it does not. When a series hovers near a threshold it can cross in and out monthly, producing oscillating scores. This is most visible in the 2018–2019 soft landing backtest: the yield curve spread repeatedly crossed the 0.52 moderate threshold, causing the model to alternate between Turbulence and Expansion regimes month to month. This is a structural property of hard-threshold scoring, not a data error. The backtest chart mitigates this visually with a 3-month rolling average, but the underlying scores remain binary.
 
-### 3. Narrow probability range
+### 3. Bounded probability range
 
-The Downside Break scenario typically ranges between 0.25 and 0.38 across most environments. The model does not produce near-0% or near-100% estimates by design — scenario floors (e.g., 0.20 minimum downside) prevent extreme probability readings. This is intentional for communication discipline but means the raw probability numbers do not behave like a calibrated statistical forecast. Treat the direction and relative level (rising vs. falling, elevated vs. low) as the signal — not the absolute number.
+The Downside Break scenario ranges from roughly 0.15 (clean Stabilization regime) to 0.50+ (Break regime with high constraint and fragility). Scenario floors prevent near-0% or near-100% readings by design. In the most common environment (Stress regime, moderate scores), the range is typically 0.25–0.42. This is intentional for communication discipline — the model is not a calibrated statistical forecast. Treat the direction and relative level (rising vs. falling, elevated vs. low) as the signal, not the absolute number.
 
 ### 4. Small calibration sample
 
