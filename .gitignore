@@ -8,3 +8,8 @@ __pycache__/
 macro_runs.db
 .streamlit/secrets.toml
 .streamlit_tmp/
+
+# Local forecast history: persistent runtime data, never source-controlled
+macro_forecasts.db
+macro_forecasts.db-shm
+macro_forecasts.db-wal
