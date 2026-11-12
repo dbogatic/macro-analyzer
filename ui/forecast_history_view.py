@@ -9,9 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from data.storage.forecast_evaluation import evaluate_binary, evaluate_continuous
-from data.storage.forecast_queries import (
-    list_forecast_history, list_models, list_outcome_revisions, list_targets,
-)
+from data.storage import forecast_queries, postgres_queries
 
 
 def render_forecast_history(db_path: str) -> None:
@@ -20,7 +18,8 @@ def render_forecast_history(db_path: str) -> None:
         "Only registered model forecasts are shown. Legacy rule-based scenario "
         "percentages are not calibrated predictions."
     )
-    targets = list_targets(db_path)
+    queries = postgres_queries if db_path.startswith(("postgresql://", "postgres://")) else forecast_queries
+    targets = queries.list_targets(db_path)
     if not targets:
         st.info(
             "Forecast database initialized. No statistical forecasts have been "
@@ -29,7 +28,7 @@ def render_forecast_history(db_path: str) -> None:
         return
 
     target = st.selectbox("Forecast target", targets, key="validation_target")
-    model_choices = list_models(db_path, target)
+    model_choices = queries.list_models(db_path, target)
     if not model_choices:
         st.info("No models registered for this target.")
         return
@@ -40,7 +39,7 @@ def render_forecast_history(db_path: str) -> None:
     label = st.selectbox("Model and version", list(model_label), key="validation_model")
     model_name, model_version = model_label[label]
 
-    revisions = list_outcome_revisions(db_path, target, model_name, model_version)
+    revisions = queries.list_outcome_revisions(db_path, target, model_name, model_version)
     selected_source = None
     if revisions:
         rev_labels = {
@@ -64,7 +63,7 @@ def render_forecast_history(db_path: str) -> None:
             "source_name": selected_source[0],
             "source_version": selected_source[1],
         }
-    history = list_forecast_history(
+    history = queries.list_forecast_history(
         db_path, target, model_name, model_version, **kwargs,
     )
     total = len(history)
