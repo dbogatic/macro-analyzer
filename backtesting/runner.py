@@ -3,7 +3,7 @@ from __future__ import annotations
 from backtesting.data_loader import load_dataset
 from config.base_weights import BASE_WEIGHTS
 from engine.auto_scoring import build_constraint_scores
-from engine.fragility import score_fragility
+from engine.fragility import score_fragility, missing_fragility_components
 from engine.momentum import classify_momentum
 from engine.normalization import finalize_scenarios
 from engine.regime import classify_regime
@@ -63,6 +63,16 @@ def run_backtest(case: dict) -> list[dict]:
         data = row.to_dict()
         constraint_scores = build_constraint_scores(data)
         fragility_scores = score_fragility(data)
+        missing_components = missing_fragility_components(fragility_scores)
+        if missing_components:
+            results.append({
+                "date": date,
+                "error": "Incomplete fragility data",
+                "missing_components": missing_components,
+                "scenarios": [],
+            })
+            prev_unemployment = float(data["unemployment"])
+            continue
         constraint_total = float(sum(constraint_scores.values()))
         fragility_total = float(sum(fragility_scores.values()))
         # 3-month unemployment trend from the historical DataFrame
