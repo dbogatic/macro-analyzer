@@ -5,15 +5,21 @@ accuracy metrics. Unmatched forecasts remain visible in coverage statistics.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import sqlite3
 from pathlib import Path
+from typing import Iterator
 
 
-def _connect(db_path: str | Path) -> sqlite3.Connection:
+@contextmanager
+def _connect(db_path: str | Path) -> Iterator[sqlite3.Connection]:
     con = sqlite3.connect(str(db_path))
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA query_only = ON")
-    return con
+    try:
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA query_only = ON")
+        yield con
+    finally:
+        con.close()
 
 
 def list_targets(db_path: str | Path) -> list[str]:
