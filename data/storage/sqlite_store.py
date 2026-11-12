@@ -16,6 +16,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    """Initialize legacy run history only; forecast storage remains separate."""
     with _connect() as conn:
         conn.execute(CREATE_RUNS_TABLE_SQL)
         conn.commit()
