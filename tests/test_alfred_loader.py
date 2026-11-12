@@ -95,11 +95,16 @@ def test_mixed_vintages_not_concatenated_as_one_series():
         asof_series_to_pandas(first + second)
 
 
-def test_missing_key_and_inverted_dates_fail_closed():
+def test_missing_key_and_inverted_dates_fail_closed(monkeypatch):
     with pytest.raises(ValueError, match="observation_start"):
         fetch_asof_series("UNRATE", "2008-01-15", "2009-01-01", api_key="fake")
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        "data.loaders.alfred_loader.settings",
+        SimpleNamespace(fred_api_key=None),
+    )
     with pytest.raises(RuntimeError, match="FRED_API_KEY"):
-        fetch_asof_series("UNRATE", "2008-01-15", "2007-01-01", api_key="")
+        fetch_asof_series("UNRATE", "2008-01-15", "2007-01-01")
 
 
 def test_vintage_series_keeps_dates_and_values():
