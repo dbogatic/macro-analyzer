@@ -54,7 +54,7 @@ def test_insert_uses_parameters_and_preserves_vintage_payload():
     assert statement.count("%s") == 14
     assert params[0] == "synthetic-1"
     assert params[9] == 0.25
-    assert "synthetic" in params[-1]
+    assert "synthetic" in params[-2]
 
 
 def test_invalid_probability_not_written():
