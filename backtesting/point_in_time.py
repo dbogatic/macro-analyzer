@@ -18,8 +18,8 @@ import pandas as pd
 from config.fred_series import FRED_SERIES, MARKET_SIGNALS
 from data.loaders.alfred_loader import AsOfObservation, fetch_asof_series
 
-# Series that need index-level YoY conversion (percentage points in output).
-_INDEX_YOY = frozenset({"core_pce", "cpi", "jobless_claims"})
+# Monthly price indexes needing exact-month YoY conversion. Weekly claims remain\n# an observed LEVEL until a separate weekly frequency-aware method is added.
+_INDEX_YOY = frozenset({"core_pce", "cpi"})
 
 
 @dataclass(frozen=True)
