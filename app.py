@@ -14,7 +14,7 @@ from data.loaders.stooq_loader import get_gld_data
 from llm.shock_classifier import classify_shock
 from data.storage.sqlite_store import init_db, save_run
 from engine.auto_scoring import build_constraint_scores
-from engine.fragility import score_fragility
+from engine.fragility import score_fragility, missing_fragility_components
 from engine.momentum import classify_momentum
 from engine.normalization import finalize_scenarios
 from engine.regime import classify_regime
@@ -124,6 +124,15 @@ if st.button("Run Analysis", type="primary"):
     constraint_scores = build_constraint_scores(raw_data)
     fragility_scores = score_fragility(raw_data)
     constraint_total = float(sum(constraint_scores.values()))
+    missing_fragility = missing_fragility_components(fragility_scores)
+    if missing_fragility:
+        st.error(
+            "Fragility assessment incomplete. Regime and scenario weights "
+            "cannot be calculated reliably; missing: "
+            + ", ".join(missing_fragility)
+        )
+        render_scorecards(constraint_scores, fragility_scores)
+        st.stop()
     fragility_total = float(sum(fragility_scores.values()))
     previous_unemployment = st.session_state.get("previous_unemployment")
 
