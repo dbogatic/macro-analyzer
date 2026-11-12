@@ -43,10 +43,16 @@ init_db()
 # Keep V2 forecast records separate from legacy scenario-run history.
 # This initialization is idempotent and never inserts fabricated forecasts.
 forecast_db_error = None
+forecast_database = settings.database_url or settings.forecast_db_path
 try:
-    ForecastRegistry(settings.forecast_db_path)
-except (sqlite3.Error, OSError, ValueError, RuntimeError) as exc:
-    forecast_db_error = str(exc)
+    if settings.database_url:
+        from data.storage.postgres_forecast import PostgresForecastRegistry
+        PostgresForecastRegistry(settings.database_url)
+    else:
+        ForecastRegistry(settings.forecast_db_path)
+except Exception as exc:
+    # Do not leak credentials or a connection string into the public UI.
+    forecast_db_error = type(exc).__name__
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
 
@@ -82,9 +88,12 @@ if mode == "Backtesting":
 if mode == "Forecast Validation":
     if forecast_db_error:
         st.error(f"Forecast database initialization failed: {forecast_db_error}")
-        st.caption("Configure MACRO_FORECAST_DB_PATH to a writable, persistent directory.")
+        st.caption("Set DATABASE_URL (PostgreSQL) in Streamlit secrets; local SQLite is for development.")
     else:
-        render_forecast_history(settings.forecast_db_path)
+        try:
+            render_forecast_history(forecast_database)
+        except Exception as exc:
+            st.error(f"Forecast validation database error: {type(exc).__name__}")
     st.stop()
 
 
