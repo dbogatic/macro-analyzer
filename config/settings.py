@@ -17,5 +17,8 @@ class Settings:
     fred_api_key: str | None = os.getenv("FRED_API_KEY")
     newsapi_key: str | None = os.getenv("NEWSAPI_KEY")
     db_path: str = str(DB_PATH)
+    forecast_db_path: str = os.getenv(
+        "MACRO_FORECAST_DB_PATH", str(ROOT_DIR / "macro_forecasts.db")
+    )
 
 settings = Settings()
