@@ -498,3 +498,39 @@ The ICE BofA HY spread series (`BAMLH0A0HYM2`) is restricted to approximately th
 ### 7. Model does not know what it does not know
 
 The rule set is compact. Novel macro regimes — a sovereign debt crisis in a G7 country, simultaneous supply and demand shocks, debt deflation — may not be captured. When the macro environment looks structurally different from 2001 or 2008, treat model outputs with additional skepticism.
+
+---
+
+## Macro Analyzer 2.0 — forecast validation (development branch only)
+
+The **Forecast Validation** Streamlit tab initializes and reads a separate SQLite
+database of registered statistical forecasts and their realized outcomes. It does
+not treat the legacy rule-based scenario percentages as statistical forecasts.
+
+- Default database: `macro_forecasts.db` in the repository root.
+- For a deployed application, set `MACRO_FORECAST_DB_PATH` to a **writable,
+  persistent volume**; temporary hosting file systems may lose records on restart.
+- The original scenario-run database `macro_runs.db` is not migrated or changed.
+- SQLite database files are excluded from Git. GitHub holds code, not live data.
+- Database initialization is idempotent and does **not** create sample forecasts.
+- The tab is empty until validated forecasting code writes forecasts and observed
+  outcomes through `data/storage/forecast_registry.py`.
+- Outcomes require an explicit source name and version. Missing outcomes are
+  shown separately; they are never counted as zero or scored as correct.
+- Available scores are descriptive only, not evidence of statistically
+  significant out-of-sample forecasting skill.
+
+Initialize explicitly (optional; Streamlit also initializes automatically):
+
+```bash
+python scripts/init_forecast_db.py
+python -m pytest -q
+streamlit run app.py
+```
+
+**Known limitations:** No automated forecast issuance, outcome ingestion,
+walk-forward validation, or persistent scheduled job is connected yet. The
+legacy backtester remains separate from the vintage-aware research modules.
+The current outcome registry does not store a formal release-calendar rule or
+nominal prediction interval level; both must be addressed before definitive
+predictive validation.
