@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import streamlit as st
@@ -44,7 +45,7 @@ init_db()
 forecast_db_error = None
 try:
     ForecastRegistry(settings.forecast_db_path)
-except (OSError, ValueError, RuntimeError) as exc:
+except (sqlite3.Error, OSError, ValueError, RuntimeError) as exc:
     forecast_db_error = str(exc)
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
