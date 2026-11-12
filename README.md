@@ -534,3 +534,48 @@ legacy backtester remains separate from the vintage-aware research modules.
 The current outcome registry does not store a formal release-calendar rule or
 nominal prediction interval level; both must be addressed before definitive
 predictive validation.
+
+
+### Production PostgreSQL on Streamlit Community Cloud
+
+The `feature/forecasting-v2` branch supports **managed PostgreSQL** for
+persistent forecast data. This is separate from the legacy descriptive
+`macro_runs.db` database, which remains local SQLite and is **not**
+durable on ephemeral Streamlit hosting.
+
+1. Provision a PostgreSQL database with a managed provider (Neon, Supabase, etc.).
+   The database must be reachable from Streamlit Community Cloud over TLS.
+2. In **Streamlit Community Cloud → your app → Settings → Secrets**, add
+   the following **root-level** value (replace with the provider's actual URL):
+
+   ```toml
+   DATABASE_URL = "postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require"
+   ```
+
+   Do **not** commit credentials to GitHub or share them in chat. Use the
+   provider's connection-pooling URL if it is recommended for hosted apps,
+   and ensure its connection mode supports your usage.
+3. Deploy the **development branch** for testing instead of replacing the
+   production `main` deployment. The app automatically initializes its
+   PostgreSQL forecast tables and append-only triggers at startup.
+4. Open **Forecast Validation**. Initially it correctly reports no registered
+   statistical forecasts. This confirms database initialization but does
+   not constitute forecast validation.
+
+Without `DATABASE_URL`, development uses `macro_forecasts.db` SQLite.
+**Do not use this fallback to store long-lived production forecasts on
+Streamlit Community Cloud.** A short-lived or restarted app container can
+lose that file. Keep provider backups enabled where available.
+
+Install dependencies with `pip install -r requirements.txt`. No manual SQL
+table setup or ZIP transfer is needed. PostgreSQL credentials are mandatory
+before a remote connection can be tested. Until then, new PostgreSQL tests
+exercise offline contracts, not a live cloud server.
+
+PostgreSQL changes do not migrate pre-existing SQLite data. If existing
+forecasts need to be moved, plan an explicit, audited migration before
+enabling production writes.
+
+**Future work:** scheduled forecast issuance, outcome ingestion, verified
+point-in-time walk-forward evaluation, and a persistence strategy for the
+legacy `runs` history are not yet complete.
