@@ -13,6 +13,7 @@ from data.loaders.news_loader import fetch_macro_headlines
 from data.loaders.stooq_loader import get_gld_data
 from llm.shock_classifier import classify_shock
 from data.storage.sqlite_store import init_db, save_run
+from data.storage.forecast_registry import ForecastRegistry
 from engine.auto_scoring import build_constraint_scores
 from engine.fragility import score_fragility, missing_fragility_components
 from engine.momentum import classify_momentum
@@ -29,6 +30,7 @@ from ui.backtest_view import render_backtest
 from ui.news_view import render_news
 from ui.dashboard import render_dashboard
 from ui.history_view import render_history
+from ui.forecast_history_view import render_forecast_history
 from ui.scenarios_view import render_scenarios
 from ui.scorecards import render_scorecards
 from config.settings import settings
@@ -37,6 +39,13 @@ from ui.triggers_view import render_triggers
 from ui.weights_view import render_weights
 
 init_db()
+# Keep V2 forecast records separate from legacy scenario-run history.
+# This initialization is idempotent and never inserts fabricated forecasts.
+forecast_db_error = None
+try:
+    ForecastRegistry(settings.forecast_db_path)
+except (OSError, ValueError, RuntimeError) as exc:
+    forecast_db_error = str(exc)
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
 
@@ -56,7 +65,10 @@ if "shock_suggestion" not in st.session_state:
 
 sidebar = render_sidebar(shock_suggestion=st.session_state["shock_suggestion"])
 
-mode = st.radio("View", ["Analysis", "History", "Backtesting"], horizontal=True)
+mode = st.radio(
+    "View", ["Analysis", "History", "Backtesting", "Forecast Validation"],
+    horizontal=True,
+)
 
 if mode == "History":
     render_history()
@@ -64,6 +76,14 @@ if mode == "History":
 
 if mode == "Backtesting":
     render_backtest()
+    st.stop()
+
+if mode == "Forecast Validation":
+    if forecast_db_error:
+        st.error(f"Forecast database initialization failed: {forecast_db_error}")
+        st.caption("Configure MACRO_FORECAST_DB_PATH to a writable, persistent directory.")
+    else:
+        render_forecast_history(settings.forecast_db_path)
     st.stop()
 
 
