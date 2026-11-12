@@ -18,11 +18,11 @@ def render_dashboard(data: dict, classification: str, constraint_total: float, f
     c4.metric("10Y-2Y", spread if spread is not None else "n/a")
 
     if classification == "Smooth":
-        st.success(f"🟢 {classification} | Constraint {constraint_total}/10 | Fragility {fragility_total}/10")
+        st.success(f"🟢 {classification} | Constraint {constraint_total}/8 | Fragility {fragility_total}/8")
     elif classification == "Turbulence":
-        st.warning(f"🟡 {classification} | Constraint {constraint_total}/10 | Fragility {fragility_total}/10")
+        st.warning(f"🟡 {classification} | Constraint {constraint_total}/8 | Fragility {fragility_total}/8")
     else:
-        st.error(f"🔴 {classification} | Constraint {constraint_total}/10 | Fragility {fragility_total}/10")
+        st.error(f"🔴 {classification} | Constraint {constraint_total}/8 | Fragility {fragility_total}/8")
 
     # Market signals panel
     st.subheader("Market Signals")
