@@ -9,4 +9,7 @@ def render_scorecards(constraint_scores: dict, fragility_scores: dict) -> None:
     st.dataframe(pd.DataFrame({"Component": list(constraint_scores.keys()), "Score": list(constraint_scores.values())}), use_container_width=True)
 
     st.subheader("Fragility")
-    st.dataframe(pd.DataFrame({"Component": list(fragility_scores.keys()), "Score": list(fragility_scores.values())}), use_container_width=True)
+    st.dataframe(pd.DataFrame({
+        "Component": list(fragility_scores.keys()),
+        "Score": [value if value is not None else "n/a (missing)" for value in fragility_scores.values()],
+    }), use_container_width=True)
